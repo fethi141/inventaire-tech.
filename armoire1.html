@@ -1,0 +1,441 @@
+<script>
+    window.jsPDF = window.jspdf.jsPDF;
+    
+    // --- CONFIGURATION GITHUB ---
+    // REMPLACEZ CECI PAR VOS INFOS
+    const GITHUB_TOKEN = "VOTRE_TOKEN_ICI"; // Ex: ghp_xxxxxxxxxxxxx
+    const GITHUB_REPO  = "votre-username/inventaire-tech"; // Ex: dupontlouis/inventaire
+    const FILE_PATH    = "data/inventory.json"; // Chemin du fichier de données
+    
+    // Initialisation connexion GitHub
+    const octo = new Octokat({ token: GITHUB_TOKEN });
+    const repo = octo.repos(GITHUB_REPO);
+
+    let inventory = { cabinets: {}, assets: {} };
+    let currentEditingCabinetId = null;
+    let currentEditingAssetId = null;
+    let githubSha = null; // Nécessaire pour mettre à jour le fichier existant
+
+    // --- UTILITAIRES ---
+    function generateId() { return 'id-' + Date.now() + '-' + Math.random().toString(16).slice(2); }
+
+    function showToast(message, type) {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        container.appendChild(toast);
+        void toast.offsetWidth;
+        toast.classList.add('show');
+        setTimeout(() => {
+            toast.classList.remove('show');
+            toast.addEventListener('transitionend', () => toast.remove());
+        }, 3000);
+    }
+
+    function highlightSearchTerms(text, terms) {
+        if (!text || !terms || terms.length === 0) return text || 'N/A';
+        const regex = new RegExp('(' + terms.join('|') + ')', 'gi');
+        return text.replace(regex, '<span class="highlight">$&</span>');
+    }
+
+    // --- GESTION DONNÉES (GITHUB) ---
+    
+    // Sauvegarde vers GitHub (Remplace localStorage)
+    async function saveInventoryToGitHub() {
+        const btn = document.querySelector("button[onclick='saveInventoryToGitHub()']");
+        if(btn) btn.innerHTML = "<i class='fas fa-spinner fa-spin mr-2'></i>Sauvegarde...";
+        
+        try {
+            const content = btoa(unescape(encodeURIComponent(JSON.stringify(inventory, null, 2)))); // Base64 encode
+            
+            let params = {
+                message: "Mise à jour inventaire",
+                content: content,
+                branch: "main"
+            };
+            
+            // Si le fichier existe déjà, on a besoin de son SHA pour le mettre à jour
+            if (githubSha) {
+                params.sha = githubSha;
+            }
+
+            const result = await repo.contents(FILE_PATH).add(params);
+            githubSha = result.commit.sha; // Mise à jour du SHA pour la prochaine fois
+            showToast('Sauvegardé sur GitHub !', 'success');
+        } catch (err) {
+            console.error(err);
+            showToast('Erreur sauvegarde GitHub', 'error');
+        }
+        if(btn) btn.innerHTML = "<i class='fas fa-cloud-upload-alt mr-2'></i>Sauvegarder (Cloud)";
+    }
+
+    // Chargement depuis GitHub
+    async function loadInventoryFromGitHub() {
+        try {
+            const result = await repo.contents(FILE_PATH).fetch();
+            githubSha = result.sha; // On garde le SHA pour la mise à jour
+            const decoded = decodeURIComponent(escape(atob(result.content)));
+            inventory = JSON.parse(decoded);
+            renderAll();
+            showToast('Données chargées depuis le Cloud', 'info');
+        } catch (err) {
+            // Si le fichier n'existe pas (première fois), on crée un inventaire vide
+            if (err.status === 404) {
+                console.log("Pas de données trouvées, création d'un nouveau fichier.");
+                inventory = { cabinets: {}, assets: {} };
+                renderAll();
+                // On crée le fichier initial
+                await saveInventoryToGitHub();
+            } else {
+                console.error(err);
+                showToast('Erreur de chargement', 'error');
+            }
+        }
+    }
+
+    // --- LOGIQUE MÉTIER (Identique à avant, mais appelle saveInventoryToGitHub) ---
+
+    function removeCabinet(id) {
+        if (confirm('Supprimer cette armoire et tout son contenu ?')) {
+            const assetIds = inventory.cabinets[id].assetIds;
+            assetIds.forEach(assetId => { delete inventory.assets[assetId]; });
+            delete inventory.cabinets[id];
+            saveInventoryToGitHub(); // ICI
+            renderAll();
+        }
+    }
+
+    function openCabinetModal(cabinetId = null) {
+        currentEditingCabinetId = cabinetId;
+        document.getElementById('cabinet-modal').classList.remove('hidden');
+        document.getElementById('cabinet-modal-title').textContent = cabinetId ? 'Modifier Armoire' : 'Ajouter Armoire';
+        const c = cabinetId ? inventory.cabinets[cabinetId] : null;
+        document.getElementById('cabinet-name').value = c?.name || '';
+        document.getElementById('cabinet-location').value = c?.location || '';
+        document.getElementById('cabinet-max-u').value = c?.maxU || 42;
+        document.getElementById('cabinet-max-ports').value = c?.maxPorts || 700;
+    }
+
+    function saveCabinet(e) {
+        e.preventDefault();
+        const id = currentEditingCabinetId || generateId();
+        inventory.cabinets[id] = { 
+            id, 
+            name: document.getElementById('cabinet-name').value, 
+            location: document.getElementById('cabinet-location').value, 
+            maxU: parseInt(document.getElementById('cabinet-max-u').value) || 42,
+            maxPorts: parseInt(document.getElementById('cabinet-max-ports').value) || 700,
+            assetIds: inventory.cabinets[id]?.assetIds || [] 
+        };
+        saveInventoryToGitHub(); renderAll(); closeModal(null, 'cabinet-modal');
+        showToast('Armoire sauvegardée', 'success');
+    }
+
+    function openAssetModal(cabinetId = null) {
+        currentEditingAssetId = null;
+        document.getElementById('asset-modal').classList.remove('hidden');
+        document.getElementById('asset-form').reset();
+        if (cabinetId) document.getElementById('asset-cabinet-id').value = cabinetId;
+        updateAssetFormFields('');
+    }
+
+    function updateAssetFormFields(type) {
+        document.getElementById('fields-subscriber').classList.toggle('hidden', type !== 'Abonné');
+        document.getElementById('fields-standard').classList.toggle('hidden', type === 'Abonné' || type === '');
+    }
+
+    function saveAsset(e) {
+        e.preventDefault();
+        const id = currentEditingAssetId || generateId();
+        const cabId = document.getElementById('asset-cabinet-id').value;
+        const type = document.getElementById('asset-type').value;
+        const asset = {
+            id, type, cabinetId: cabId,
+            name: document.getElementById('asset-name').value,
+            description: document.getElementById('asset-description').value,
+            phoneNumber: document.getElementById('asset-phone-number').value,
+            subscriberName: document.getElementById('asset-subscriber-name').value,
+            systemPort: document.getElementById('asset-system-port').value,
+            destinationPort: document.getElementById('asset-destination-port').value,
+            uStart: document.getElementById('asset-u-start').value,
+            uSize: document.getElementById('asset-u-size').value,
+            vlan: document.getElementById('asset-vlan').value,
+            port: document.getElementById('asset-port').value
+        };
+        inventory.assets[id] = asset;
+        if(!inventory.cabinets[cabId].assetIds.includes(id)) inventory.cabinets[cabId].assetIds.push(id);
+        saveInventoryToGitHub(); renderAll(); closeModal(null, 'asset-modal');
+    }
+
+    function editAsset(id) {
+        currentEditingAssetId = id;
+        const a = inventory.assets[id];
+        document.getElementById('asset-modal').classList.remove('hidden');
+        document.getElementById('asset-name').value = a.name;
+        document.getElementById('asset-type').value = a.type;
+        document.getElementById('asset-cabinet-id').value = a.cabinetId;
+        updateAssetFormFields(a.type);
+        document.getElementById('asset-phone-number').value = a.phoneNumber || '';
+        document.getElementById('asset-subscriber-name').value = a.subscriberName || '';
+        document.getElementById('asset-u-start').value = a.uStart || '';
+        document.getElementById('asset-u-size').value = a.uSize || '';
+    }
+
+    function removeAsset(id) {
+        if(!confirm('Supprimer cet équipement ?')) return;
+        const a = inventory.assets[id];
+        inventory.cabinets[a.cabinetId].assetIds = inventory.cabinets[a.cabinetId].assetIds.filter(aid => aid !== id);
+        delete inventory.assets[id];
+        saveInventoryToGitHub(); renderAll();
+    }
+
+    // --- RENDU VISUEL (Identique) ---
+    function renderInventory() {
+        const view = document.getElementById('inventory-view');
+        const filterCabinetId = document.getElementById('cabinet-filter').value;
+        const filterType = document.getElementById('type-filter').value;
+        const searchTerm = document.getElementById('search-input').value.toLowerCase().trim();
+        const searchTerms = searchTerm.split(/\s+/).filter(t => t.length > 0);
+        
+        view.innerHTML = '';
+        let filteredCabinets = Object.values(inventory.cabinets).sort((a,b) => a.name.localeCompare(b.name));
+
+        if (filterCabinetId) filteredCabinets = filteredCabinets.filter(c => c.id === filterCabinetId);
+
+        filteredCabinets.forEach(cabinet => {
+            const maxU = cabinet.maxU || 42;
+            const maxPorts = cabinet.maxPorts || 700;
+
+            let totalUOccupied = 0;
+            let totalPortsOccupied = 0;
+            
+            let rackVisualHtml = `<div class="rack-visual" title="Visualisation U (Taille: ${maxU}U)">`;
+            let uMap = new Array(maxU).fill('empty');
+
+            cabinet.assetIds.forEach(id => {
+                const a = inventory.assets[id];
+                if (!a) return;
+
+                if (a.type === 'Abonné') {
+                    totalPortsOccupied += 1;
+                } else {
+                    const size = parseInt(a.uSize) || 0;
+                    const start = parseInt(a.uStart) || 0;
+                    totalUOccupied += size;
+                    
+                    if (start > 0 && start <= maxU) {
+                        for(let i = 0; i < size; i++) {
+                            let uIndex = start + i - 1; 
+                            if (uIndex < maxU) {
+                                if (a.type === 'Serveur') uMap[uIndex] = 'server';
+                                else if (a.type === 'Switch') uMap[uIndex] = 'switch';
+                                else uMap[uIndex] = 'other';
+                            }
+                        }
+                    }
+                }
+            });
+
+            uMap.forEach(state => { rackVisualHtml += `<div class="rack-unit ${state}"></div>`; });
+            rackVisualHtml += '</div>';
+
+            const filteredAssetIds = cabinet.assetIds.filter(id => {
+                const a = inventory.assets[id];
+                if (!a) return false;
+                if (filterType && a.type !== filterType) return false;
+                if (searchTerms.length > 0) {
+                    const fields = [a.name, a.subscriberName, a.phoneNumber, a.systemPort, a.destinationPort, cabinet.name].join(' ').toLowerCase();
+                    return searchTerms.every(t => fields.includes(t));
+                }
+                return true;
+            });
+
+            if (filteredAssetIds.length === 0 && (searchTerm || filterType)) return;
+
+            const portPerc = (totalPortsOccupied / maxPorts) * 100;
+            const uPerc = (totalUOccupied / maxU) * 100;
+
+            const card = document.createElement('div');
+            card.className = `bg-dark-gray p-6 rounded-xl border border-gray-700 shadow-2xl transition-all ${cabinet.name.toLowerCase() === searchTerm ? 'highlight-scan' : ''}`;
+            
+            // URL absolue pour le QR Code (votre page GitHub)
+            const pageUrl = `https://votre-username.github.io/inventaire-tech/?search=${encodeURIComponent(cabinet.name)}`;
+
+            card.innerHTML = `
+                <div class="flex justify-between items-start mb-4 border-b border-gray-700 pb-2">
+                    <div>
+                        <h3 class="text-2xl font-bold neon-cyan">${highlightSearchTerms(cabinet.name, searchTerms)}</h3>
+                        <p class="text-xs text-gray-400">${highlightSearchTerms(cabinet.location, searchTerms)} | ${maxU}U - ${maxPorts} Ports</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        ${rackVisualHtml}
+                        <div id="qr-card-${cabinet.id}" class="qr-card-container"></div>
+                    </div>
+                </div>
+                <div class="space-y-4 mb-6">
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-gray-300">Ports Brassage</span>
+                            <span class="neon-green">${totalPortsOccupied}/${maxPorts}</span>
+                        </div>
+                        <div class="progress-bar-container"><div class="progress-bar-fill bg-green-500" style="width:${Math.min(100, portPerc)}%"></div></div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-gray-300">Espace Physique</span>
+                            <span class="neon-cyan">${totalUOccupied}/${maxU}U</span>
+                        </div>
+                        <div class="progress-bar-container"><div class="progress-bar-fill bg-cyan-500" style="width:${Math.min(100, uPerc)}%"></div></div>
+                    </div>
+                </div>
+                <div class="flex gap-2 mb-4">
+                    <button onclick="editCabinet('${cabinet.id}')" class="btn-yellow text-xs px-3">Editer</button>
+                    <button onclick="openAssetModal('${cabinet.id}')" class="btn-green text-xs px-3">Ajouter</button>
+                    <button onclick="removeCabinet('${cabinet.id}')" class="btn-red text-xs px-3"><i class="fas fa-trash"></i></button>
+                </div>
+                <div class="space-y-2 max-h-60 overflow-y-auto pr-2">
+                    ${filteredAssetIds.map(id => {
+                        const a = inventory.assets[id];
+                        return `<div class="p-2 bg-[#0d1117] rounded border border-gray-800 text-xs">
+                            <div class="flex justify-between font-bold">
+                                <span>${highlightSearchTerms(a.name, searchTerms)}</span>
+                                <span class="text-gray-500">${a.type} ${a.uStart ? `(U${a.uStart})` : ''}</span>
+                            </div>
+                            <div class="flex gap-2 mt-1 opacity-70">
+                                <button onclick="editAsset('${a.id}')" class="text-yellow-500">Modifier</button>
+                                <button onclick="removeAsset('${a.id}')" class="text-red-500">Supprimer</button>
+                            </div>
+                        </div>`;
+                    }).join('')}
+                </div>
+            `;
+            view.appendChild(card);
+
+            new QRCode(document.getElementById(`qr-card-${cabinet.id}`), {
+                text: pageUrl, // Utilise l'URL GitHub
+                width: 50, height: 50
+            });
+        });
+    }
+
+    function updateAssetDropdown() {
+        const filter = document.getElementById('cabinet-filter');
+        const form = document.getElementById('asset-cabinet-id');
+        const ids = Object.keys(inventory.cabinets);
+        let options = '<option value="">Toutes les armoires</option>';
+        let formOptions = '';
+        ids.forEach(id => {
+            const c = inventory.cabinets[id];
+            options += `<option value="${id}">${c.name}</option>`;
+            formOptions += `<option value="${id}">${c.name} (${c.maxU}U)</option>`;
+        });
+        filter.innerHTML = options;
+        form.innerHTML = formOptions;
+    }
+
+    function filterInventory() { renderInventory(); }
+
+    function renderStats() {
+        const container = document.getElementById('stats-container');
+        const cabs = Object.keys(inventory.cabinets).length;
+        const assets = Object.keys(inventory.assets).length;
+        const subs = Object.values(inventory.assets).filter(a => a.type === 'Abonné').length;
+        container.innerHTML = `
+            <div class="bg-dark-gray p-4 rounded-lg text-center border border-gray-700"><div class="text-2xl font-bold neon-cyan">${cabs}</div><p class="text-xs text-gray-400">Armoires</p></div>
+            <div class="bg-dark-gray p-4 rounded-lg text-center border border-gray-700"><div class="text-2xl font-bold neon-green">${assets}</div><p class="text-xs text-gray-400">Équipements</p></div>
+            <div class="bg-dark-gray p-4 rounded-lg text-center border border-gray-700"><div class="text-2xl font-bold neon-yellow">${subs}</div><p class="text-xs text-gray-400">Abonnés</p></div>
+            <div class="bg-dark-gray p-4 rounded-lg text-center border border-gray-700"><div class="text-2xl font-bold neon-red">${Math.round((subs/700)*100)}%</div><p class="text-xs text-gray-400">Occup. Moyenne</p></div>
+        `;
+    }
+
+    function renderAll() { updateAssetDropdown(); renderStats(); renderInventory(); }
+
+    function closeModal(event, id) { if (!event || event.target.id === id) document.getElementById(id).classList.add('hidden'); }
+
+    function clearAllData() { if(confirm('Vider tout ?')) { inventory = {cabinets:{}, assets:{}}; saveInventoryToGitHub(); renderAll(); } }
+    
+    // Les imports manuels sont moins utiles maintenant, mais on peut garder
+    function exportInventory() { 
+        const blob = new Blob([JSON.stringify(inventory, null, 2)], {type:'application/json'});
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'export_inventaire.json'; a.click();
+    }
+    
+    function importInventory(e) {
+        const reader = new FileReader();
+        reader.onload = (event) => { 
+            try {
+                inventory = JSON.parse(event.target.result); 
+                saveInventoryToGitHub(); // Sauvegarde sur GitHub immédiatement
+                renderAll();
+                showToast('Importé et sauvegardé', 'success');
+            } catch(err) {
+                showToast('Erreur de fichier JSON', 'error');
+            }
+        };
+        reader.readAsText(e.target.files[0]);
+    }
+
+    // --- EXPORTS PDF (Inchangés) ---
+    function exportToPdf() {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        doc.setFontSize(18);
+        doc.setTextColor(0, 255, 255);
+        doc.text("Inventaire Technique Complet", 14, 15);
+        let y = 25;
+        Object.values(inventory.cabinets).forEach(cabinet => {
+            if (y > 240) { doc.addPage(); y = 20; }
+            doc.setFontSize(14);
+            doc.setTextColor(0, 255, 136);
+            doc.text(`Armoire : ${cabinet.name}`, 14, y);
+            doc.setFontSize(10);
+            doc.setTextColor(150);
+            doc.text(`Localisation: ${cabinet.location} | Capacité: ${cabinet.maxU}U / ${cabinet.maxPorts}P`, 14, y + 5);
+            y += 10;
+            const rows = cabinet.assetIds.map(id => {
+                const a = inventory.assets[id];
+                return [a.name, a.type, (a.type === 'Abonné') ? (a.subscriberName || '-') : (`U${a.uStart || '-'}`), (a.type === 'Abonné') ? (a.systemPort || '-') : (a.vlan || '-'), a.description || '-'];
+            });
+            if (rows.length > 0) {
+                doc.autoTable({ startY: y, head: [['Nom', 'Type', 'Détails', 'Port/VLAN', 'Notes']], body: rows, theme: 'grid', headStyles: { fillColor: [22, 27, 34], textColor: [0, 255, 136] }, styles: { fontSize: 8 }, margin: { left: 14, right: 14 } });
+                y = doc.lastAutoTable.finalY + 15;
+            }
+        });
+        doc.save('inventaire_complet.pdf');
+    }
+
+    function exportSubscribersToPdf() {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        doc.setFontSize(18);
+        doc.setTextColor(255, 204, 0);
+        doc.text("Liste des Abonnés", 14, 15);
+        const rows = [];
+        Object.values(inventory.cabinets).forEach(c => {
+            c.assetIds.forEach(id => {
+                const a = inventory.assets[id];
+                if (a.type === 'Abonné') rows.push([c.name, a.name, a.subscriberName || '-', a.phoneNumber || '-', a.systemPort || '-', a.destinationPort || '-']);
+            });
+        });
+        doc.autoTable({ startY: 25, head: [['Armoire', 'Nom', 'Client', 'Tel', 'Port Sys', 'Port Dest']], body: rows, headStyles: { fillColor: [255, 204, 0], textColor: [0, 0, 0] } });
+        doc.save('liste_abonnes.pdf');
+    }
+
+    function imprimerPlancheQR() {
+        const win = window.open('', '_blank');
+        const baseUrl = "https://votre-username.github.io/inventaire-tech/"; // Changez ceci
+        win.document.write(`<html><head><title>Planche QR</title><script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script><style>body{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;padding:20px;}.label{border:1px dashed #ccc;padding:10px;text-align:center;}</style></head><body><script>const cabs=${JSON.stringify(Object.values(inventory.cabinets))};cabs.forEach((c,i)=>{const d=document.createElement('div');d.className='label';d.innerHTML='<b>'+c.name+'</b><div id="qri-'+i+'"></div>';document.body.appendChild(d);new QRCode(document.getElementById('qri-'+i),{text:baseUrl+"?search="+encodeURIComponent(c.name),width:100,height:100});});setTimeout(()=>{window.print();window.close();},1000);<\/script></body></html>`);
+        win.document.close();
+    }
+
+    // --- INITIALISATION ---
+    window.onload = function() {
+        loadInventoryFromGitHub(); // Charge depuis GitHub au démarrage
+        const params = new URLSearchParams(window.location.search);
+        if(params.get('search')) {
+            document.getElementById('search-input').value = params.get('search');
+            filterInventory();
+        }
+    };
+</script>
