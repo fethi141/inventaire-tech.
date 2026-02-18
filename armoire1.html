@@ -1,441 +1,216 @@
-<script>
-    window.jsPDF = window.jspdf.jsPDF;
-    
-    // --- CONFIGURATION GITHUB ---
-    // REMPLACEZ CECI PAR VOS INFOS
-    const GITHUB_TOKEN = "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"; // Ex: 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
-    const GITHUB_REPO  = "https://fethi141.github.io/inventaire-tech./"; // Ex: fethi141/inventaire
-    const FILE_PATH    = "data/inventory.json"; // Chemin du fichier de données
-    
-    // Initialisation connexion GitHub
-    const octo = new Octokat({ token: GITHUB_TOKEN });
-    const repo = octo.repos(GITHUB_REPO);
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestionnaire d'Inventaire (Version Sécurisée)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #0d1117; color: #ffffff; line-height: 1.6; }
+        .neon-cyan { color: #00ffff; } .neon-red { color: #ff007f; } .neon-green { color: #00ff88; } .neon-yellow { color: #ffcc00; }
+        .bg-dark-gray { background-color: #161b22; }
+        .btn-green { background-color: #00ff88; color: #0d1117; padding: 8px 16px; border-radius: 8px; font-weight: 600; transition: all 0.2s; } .btn-green:hover { background-color: #00cc66; box-shadow: 0 0 10px #00ff88; }
+        .btn-red { background-color: #ff007f; color: #0d1117; padding: 8px 16px; border-radius: 8px; font-weight: 600; transition: all 0.2s; } .btn-red:hover { background-color: #cc0066; box-shadow: 0 0 10px #ff007f; }
+        .btn-blue { background-color: #00ffff; color: #0d1117; padding: 8px 16px; border-radius: 8px; font-weight: 600; transition: all 0.2s; } .btn-blue:hover { background-color: #00cccc; box-shadow: 0 0 10px #00ffff; }
+        .btn-yellow { background-color: #ffcc00; color: #0d1117; padding: 8px 16px; border-radius: 8px; font-weight: 600; transition: all 0.2s; } .btn-yellow:hover { background-color: #cca300; box-shadow: 0 0 10px #ffcc00; }
+        .btn-purple { background-color: #a855f7; color: #ffffff; padding: 8px 16px; border-radius: 8px; font-weight: 600; transition: all 0.2s; } .btn-purple:hover { background-color: #9333ea; box-shadow: 0 0 10px #a855f7; }
+        .form-input, .form-select { background-color: #0d1117; border: 1px solid #30363d; padding: 8px; border-radius: 6px; color: #ffffff; transition: border-color 0.2s; } .form-input:focus, .form-select:focus { border-color: #00ffff; outline: none; box-shadow: 0 0 5px #00ffff; }
+        .modal { background-color: rgba(0, 0, 0, 0.7); } .modal-content { background-color: #161b22; border: 1px solid #30363d; box-shadow: 0 0 20px rgba(0, 255, 255, 0.2); }
+        .highlight { background-color: rgba(255, 204, 0, 0.5); color: #000000; font-weight: 700; padding: 1px 2px; border-radius: 3px; }
+        #toast-container { position: fixed; top: 20px; right: 20px; z-index: 1000; }
+        .toast { padding: 12px 20px; margin-bottom: 10px; border-radius: 8px; color: #0d1117; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); opacity: 0; transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out; transform: translateX(100%); }
+        .toast.show { opacity: 1; transform: translateX(0); }
+        .toast.success { background-color: #00ff88; } .toast.error { background-color: #ff007f; } .toast.info { background-color: #00ffff; }
+        .progress-bar-container { height: 8px; background-color: #30363d; border-radius: 4px; overflow: hidden; } .progress-bar-fill { height: 100%; transition: width 0.5s ease-in-out; }
+        .qr-card-container canvas, .qr-card-container img { border: 2px solid white; border-radius: 4px; background: white; }
+        .highlight-scan { border: 2px solid #00ffff !important; box-shadow: 0 0 20px rgba(0, 255, 255, 0.4); transform: scale(1.02); }
+        .rack-visual { display: flex; flex-direction: column-reverse; width: 30px; border: 1px solid #30363d; border-radius: 4px; overflow: hidden; background: #0d1117; gap: 1px; padding: 1px; }
+        .rack-unit { height: 2px; width: 100%; }
+        .rack-unit.used-server { background-color: #00ff88; } .rack-unit.used-switch { background-color: #00ffff; } .rack-unit.used-other { background-color: #ffcc00; } .rack-unit.empty { background-color: #1f2937; }
+    </style>
+</head>
+<body class="min-h-screen p-4 sm:p-8">
 
-    let inventory = { cabinets: {}, assets: {} };
-    let currentEditingCabinetId = null;
-    let currentEditingAssetId = null;
-    let githubSha = null; // Nécessaire pour mettre à jour le fichier existant
+    <div id="toast-container"></div>
 
-    // --- UTILITAIRES ---
-    function generateId() { return 'id-' + Date.now() + '-' + Math.random().toString(16).slice(2); }
+    <header class="text-center mb-10 border-b pb-4 border-gray-700">
+        <h1 class="text-3xl sm:text-4xl font-extrabold neon-cyan"><i class="fas fa-cubes mr-2"></i>Gestionnaire d'Inventaire</h1>
+        <p class="text-lg text-gray-400 mt-2">Armoires Techniques & Équipements</p>
+    </header>
 
-    function showToast(message, type) {
-        const container = document.getElementById('toast-container');
-        const toast = document.createElement('div');
-        toast.className = `toast ${type}`;
-        toast.textContent = message;
-        container.appendChild(toast);
-        void toast.offsetWidth;
-        toast.classList.add('show');
-        setTimeout(() => {
-            toast.classList.remove('show');
-            toast.addEventListener('transitionend', () => toast.remove());
-        }, 3000);
-    }
+    <main class="max-w-7xl mx-auto">
+        <div id="stats-container" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8"></div>
 
-    function highlightSearchTerms(text, terms) {
-        if (!text || !terms || terms.length === 0) return text || 'N/A';
-        const regex = new RegExp('(' + terms.join('|') + ')', 'gi');
-        return text.replace(regex, '<span class="highlight">$&</span>');
-    }
+        <div class="flex flex-wrap gap-4 mb-8 justify-between items-center">
+            <div class="flex flex-wrap gap-3">
+                <button class="btn-blue" onclick="openCabinetModal()"><i class="fas fa-plus-square mr-2"></i>Ajouter Armoire</button>
+                <button class="btn-green" onclick="openAssetModal()"><i class="fas fa-plus-circle mr-2"></i>Ajouter Équipement</button>
+                <button class="btn-purple" onclick="imprimerPlancheQR()"><i class="fas fa-qrcode mr-2"></i>Planche QR</button>
+            </div>
+            <div class="flex flex-wrap gap-3 items-center">
+                <button class="btn-red text-sm" onclick="clearAllData()"><i class="fas fa-eraser mr-2"></i>Vider</button>
+                <button class="btn-yellow text-sm" onclick="exportInventory()"><i class="fas fa-file-export mr-2"></i>Export JSON</button>
+                <button class="btn-blue text-sm" onclick="document.getElementById('file-input').click()"><i class="fas fa-file-import mr-2"></i>Import JSON</button>
+                <input type="file" id="file-input" accept=".json" onchange="importInventory(event)" class="hidden">
+                <button class="btn-yellow text-sm" onclick="exportSubscribersToPdf()"><i class="fas fa-print mr-2"></i>Imprimer Abonnés</button>
+                <button class="btn-blue text-sm" onclick="exportToPdf()"><i class="fas fa-file-pdf mr-2"></i>PDF Complet</button>
+            </div>
+        </div>
 
-    // --- GESTION DONNÉES (GITHUB) ---
-    
-    // Sauvegarde vers GitHub (Remplace localStorage)
-    async function saveInventoryToGitHub() {
-        const btn = document.querySelector("button[onclick='saveInventoryToGitHub()']");
-        if(btn) btn.innerHTML = "<i class='fas fa-spinner fa-spin mr-2'></i>Sauvegarde...";
+        <div class="bg-dark-gray p-4 rounded-lg mb-8 border border-gray-700">
+            <h2 class="text-xl font-semibold mb-3 neon-green"><i class="fas fa-filter mr-1"></i>Recherche</h2>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <input type="text" id="search-input" oninput="filterInventory()" placeholder="Chercher armoire, abonné..." class="form-input col-span-1 md:col-span-2">
+                <select id="cabinet-filter" onchange="filterInventory()" class="form-select"><option value="">Toutes les armoires</option></select>
+                <select id="type-filter" onchange="filterInventory()" class="form-select">
+                    <option value="">Tous les types</option>
+                    <option value="Serveur">Serveur</option>
+                    <option value="Switch">Switch / Routeur</option>
+                    <option value="Abonné">Abonné</option>
+                </select>
+            </div>
+        </div>
+
+        <h2 class="text-2xl font-bold mb-4 neon-cyan"><i class="fas fa-clipboard-list mr-2"></i>Inventaire</h2>
+        <div id="inventory-view" class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6"></div>
+    </main>
+
+    <!-- Modals (Cabinet et Asset) -->
+    <div id="cabinet-modal" class="modal fixed inset-0 flex items-center justify-center p-4 hidden z-50" onclick="closeModal(event, 'cabinet-modal')">
+        <div class="modal-content w-full max-w-lg p-6 rounded-xl relative">
+            <h3 id="cabinet-modal-title" class="text-2xl font-bold mb-4 neon-cyan">Ajouter Armoire</h3>
+            <form id="cabinet-form" onsubmit="saveCabinet(event)">
+                <input type="hidden" id="cabinet-id">
+                <div class="mb-4"><label class="block text-sm font-medium mb-1">Nom de l'Armoire</label><input type="text" id="cabinet-name" required class="form-input w-full"></div>
+                <div class="mb-4"><label class="block text-sm font-medium mb-1">Localisation</label><input type="text" id="cabinet-location" required class="form-input w-full"></div>
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div><label class="block text-sm font-medium mb-1">Taille (U)</label><input type="number" id="cabinet-max-u" value="42" min="1" class="form-input w-full"></div>
+                    <div><label class="block text-sm font-medium mb-1">Capacité Ports</label><input type="number" id="cabinet-max-ports" value="700" min="1" class="form-input w-full"></div>
+                </div>
+                <div class="flex justify-end space-x-3 mt-6">
+                    <button type="button" class="btn-red" onclick="closeModal(null, 'cabinet-modal')">Annuler</button>
+                    <button type="submit" class="btn-green">Sauvegarder</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="asset-modal" class="modal fixed inset-0 flex items-center justify-center p-4 hidden z-50" onclick="closeModal(event, 'asset-modal')">
+        <div class="modal-content w-full max-w-lg p-6 rounded-xl relative">
+            <h3 id="asset-modal-title" class="text-2xl font-bold mb-4 neon-cyan">Ajouter Équipement</h3>
+            <form id="asset-form" onsubmit="saveAsset(event)">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="col-span-1"><label class="block text-sm font-medium mb-1">Nom/Description</label><input type="text" id="asset-name" required class="form-input w-full"></div>
+                    <div class="col-span-1"><label class="block text-sm font-medium mb-1">Type</label><select id="asset-type" onchange="updateAssetFormFields(this.value)" required class="form-select w-full"><option value="">Sélectionner...</option><option value="Serveur">Serveur</option><option value="Switch">Switch / Routeur</option><option value="Abonné">Abonné</option></select></div>
+                    <div class="col-span-2"><label class="block text-sm font-medium mb-1">Armoire</label><select id="asset-cabinet-id" required class="form-select w-full"></select></div>
+                </div>
+                <div id="fields-subscriber" class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 hidden bg-[#0f141a] p-3 rounded-lg border border-gray-700">
+                    <h4 class="col-span-2 font-bold text-lg neon-yellow border-b border-gray-600 pb-2 mb-2">Détails Abonné</h4>
+                    <input type="text" id="asset-phone-number" class="form-input w-full" placeholder="Téléphone"><input type="text" id="asset-subscriber-name" class="form-input w-full" placeholder="Nom Client">
+                    <input type="text" id="asset-system-port" class="form-input w-full" placeholder="Port Système"><input type="text" id="asset-destination-port" class="form-input w-full" placeholder="Port Destination">
+                </div>
+                <div id="fields-standard" class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 hidden bg-[#0f141a] p-3 rounded-lg border border-gray-700">
+                    <h4 class="col-span-2 font-bold text-lg neon-green border-b border-gray-600 pb-2 mb-2">Détails Standard (U)</h4>
+                    <input type="number" id="asset-u-start" min="1" class="form-input w-full" placeholder="U Début"><input type="number" id="asset-u-size" min="1" class="form-input w-full" placeholder="Taille U">
+                    <input type="text" id="asset-vlan" class="form-input w-full" placeholder="VLANs"><input type="text" id="asset-port" class="form-input w-full" placeholder="Port Branchement">
+                </div>
+                <div class="mt-4"><label class="block text-sm font-medium mb-1">Notes</label><textarea id="asset-description" rows="2" class="form-input w-full"></textarea></div>
+                <div class="flex justify-end space-x-3 mt-6">
+                    <button type="button" class="btn-red" onclick="closeModal(null, 'asset-modal')">Annuler</button>
+                    <button type="submit" class="btn-green">Sauvegarder</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        window.jsPDF = window.jspdf.jsPDF;
+        let inventory = { cabinets: {}, assets: {} };
+        let currentEditingCabinetId = null;
+        let currentEditingAssetId = null;
+
+        function generateId() { return 'id-' + Date.now() + '-' + Math.random().toString(16).slice(2); }
+        function showToast(message, type) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`; toast.textContent = message;
+            container.appendChild(toast); void toast.offsetWidth;
+            toast.classList.add('show');
+            setTimeout(() => { toast.classList.remove('show'); toast.addEventListener('transitionend', () => toast.remove()); }, 3000);
+        }
+        function highlightSearchTerms(text, terms) { if (!text || !terms || terms.length === 0) return text || 'N/A'; const regex = new RegExp('(' + terms.join('|') + ')', 'gi'); return text.replace(regex, '<span class="highlight">$&</span>'); }
+        function saveInventoryToLocalStorage() { localStorage.setItem('inventory', JSON.stringify(inventory)); }
+        function loadInventoryFromLocalStorage() { const stored = localStorage.getItem('inventory'); if (stored) { inventory = JSON.parse(stored); renderAll(); } else { renderAll(); } }
+
+        function removeCabinet(id) { if (confirm('Supprimer cette armoire et tout son contenu ?')) { const assetIds = inventory.cabinets[id].assetIds; assetIds.forEach(assetId => { delete inventory.assets[assetId]; }); delete inventory.cabinets[id]; saveInventoryToLocalStorage(); renderAll(); showToast('Armoire et contenu supprimés', 'success'); } }
+        function openCabinetModal(cabinetId = null) { currentEditingCabinetId = cabinetId; document.getElementById('cabinet-modal').classList.remove('hidden'); document.getElementById('cabinet-modal-title').textContent = cabinetId ? 'Modifier Armoire' : 'Ajouter Armoire'; const c = cabinetId ? inventory.cabinets[cabinetId] : null; document.getElementById('cabinet-name').value = c?.name || ''; document.getElementById('cabinet-location').value = c?.location || ''; document.getElementById('cabinet-max-u').value = c?.maxU || 42; document.getElementById('cabinet-max-ports').value = c?.maxPorts || 700; }
+        function saveCabinet(e) { e.preventDefault(); const id = currentEditingCabinetId || generateId(); inventory.cabinets[id] = { id, name: document.getElementById('cabinet-name').value, location: document.getElementById('cabinet-location').value, maxU: parseInt(document.getElementById('cabinet-max-u').value) || 42, maxPorts: parseInt(document.getElementById('cabinet-max-ports').value) || 700, assetIds: inventory.cabinets[id]?.assetIds || [] }; saveInventoryToLocalStorage(); renderAll(); closeModal(null, 'cabinet-modal'); showToast('Armoire sauvegardée', 'success'); }
+        function openAssetModal(cabinetId = null) { currentEditingAssetId = null; document.getElementById('asset-modal').classList.remove('hidden'); document.getElementById('asset-form').reset(); if (cabinetId) document.getElementById('asset-cabinet-id').value = cabinetId; updateAssetFormFields(''); }
+        function updateAssetFormFields(type) { document.getElementById('fields-subscriber').classList.toggle('hidden', type !== 'Abonné'); document.getElementById('fields-standard').classList.toggle('hidden', type === 'Abonné' || type === ''); }
+        function saveAsset(e) { e.preventDefault(); const id = currentEditingAssetId || generateId(); const cabId = document.getElementById('asset-cabinet-id').value; const type = document.getElementById('asset-type').value; const asset = { id, type, cabinetId: cabId, name: document.getElementById('asset-name').value, description: document.getElementById('asset-description').value, phoneNumber: document.getElementById('asset-phone-number').value, subscriberName: document.getElementById('asset-subscriber-name').value, systemPort: document.getElementById('asset-system-port').value, destinationPort: document.getElementById('asset-destination-port').value, uStart: document.getElementById('asset-u-start').value, uSize: document.getElementById('asset-u-size').value, vlan: document.getElementById('asset-vlan').value, port: document.getElementById('asset-port').value }; inventory.assets[id] = asset; if (!inventory.cabinets[cabId].assetIds.includes(id)) inventory.cabinets[cabId].assetIds.push(id); saveInventoryToLocalStorage(); renderAll(); closeModal(null, 'asset-modal'); }
+        function editAsset(id) { currentEditingAssetId = id; const a = inventory.assets[id]; document.getElementById('asset-modal').classList.remove('hidden'); document.getElementById('asset-name').value = a.name; document.getElementById('asset-type').value = a.type; document.getElementById('asset-cabinet-id').value = a.cabinetId; updateAssetFormFields(a.type); document.getElementById('asset-phone-number').value = a.phoneNumber || ''; document.getElementById('asset-subscriber-name').value = a.subscriberName || ''; document.getElementById('asset-u-start').value = a.uStart || ''; document.getElementById('asset-u-size').value = a.uSize || ''; }
+        function removeAsset(id) { if (!confirm('Supprimer cet équipement ?')) return; const a = inventory.assets[id]; inventory.cabinets[a.cabinetId].assetIds = inventory.cabinets[a.cabinetId].assetIds.filter(aid => aid !== id); delete inventory.assets[id]; saveInventoryToLocalStorage(); renderAll(); }
         
-        try {
-            const content = btoa(unescape(encodeURIComponent(JSON.stringify(inventory, null, 2)))); // Base64 encode
-            
-            let params = {
-                message: "Mise à jour inventaire",
-                content: content,
-                branch: "main"
-            };
-            
-            // Si le fichier existe déjà, on a besoin de son SHA pour le mettre à jour
-            if (githubSha) {
-                params.sha = githubSha;
-            }
-
-            const result = await repo.contents(FILE_PATH).add(params);
-            githubSha = result.commit.sha; // Mise à jour du SHA pour la prochaine fois
-            showToast('Sauvegardé sur GitHub !', 'success');
-        } catch (err) {
-            console.error(err);
-            showToast('Erreur sauvegarde GitHub', 'error');
+        function renderInventory() {
+            const view = document.getElementById('inventory-view'); const filterCabinetId = document.getElementById('cabinet-filter').value; const filterType = document.getElementById('type-filter').value; const searchTerm = document.getElementById('search-input').value.toLowerCase().trim(); const searchTerms = searchTerm.split(/\s+/).filter(t => t.length > 0);
+            view.innerHTML = ''; let filteredCabinets = Object.values(inventory.cabinets).sort((a, b) => a.name.localeCompare(b.name));
+            if (filterCabinetId) filteredCabinets = filteredCabinets.filter(c => c.id === filterCabinetId);
+            filteredCabinets.forEach(cabinet => {
+                const maxU = cabinet.maxU || 42; const maxPorts = cabinet.maxPorts || 700; let totalUOccupied = 0, totalPortsOccupied = 0;
+                let rackVisualHtml = `<div class="rack-visual" title="Visualisation U (Taille: ${maxU}U)">`; let uMap = new Array(maxU).fill('empty');
+                cabinet.assetIds.forEach(id => { const a = inventory.assets[id]; if (!a) return; if (a.type === 'Abonné') { totalPortsOccupied += 1; } else { const size = parseInt(a.uSize) || 0; const start = parseInt(a.uStart) || 0; totalUOccupied += size; if (start > 0 && start <= maxU) { for (let i = 0; i < size; i++) { let uIndex = start + i - 1; if (uIndex < maxU) { if (a.type === 'Serveur') uMap[uIndex] = 'server'; else if (a.type === 'Switch') uMap[uIndex] = 'switch'; else uMap[uIndex] = 'other'; } } } } });
+                uMap.forEach(state => { rackVisualHtml += `<div class="rack-unit ${state}"></div>`; }); rackVisualHtml += '</div>';
+                const filteredAssetIds = cabinet.assetIds.filter(id => { const a = inventory.assets[id]; if (!a) return false; if (filterType && a.type !== filterType) return false; if (searchTerms.length > 0) { const fields = [a.name, a.subscriberName, a.phoneNumber, a.systemPort, a.destinationPort, cabinet.name].join(' ').toLowerCase(); return searchTerms.every(t => fields.includes(t)); } return true; });
+                if (filteredAssetIds.length === 0 && (searchTerm || filterType)) return;
+                const portPerc = (totalPortsOccupied / maxPorts) * 100; const uPerc = (totalUOccupied / maxU) * 100;
+                const card = document.createElement('div'); card.className = `bg-dark-gray p-6 rounded-xl border border-gray-700 shadow-2xl transition-all ${cabinet.name.toLowerCase() === searchTerm ? 'highlight-scan' : ''}`;
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-4 border-b border-gray-700 pb-2"><div><h3 class="text-2xl font-bold neon-cyan">${highlightSearchTerms(cabinet.name, searchTerms)}</h3><p class="text-xs text-gray-400">${highlightSearchTerms(cabinet.location, searchTerms)} | ${maxU}U - ${maxPorts} Ports</p></div><div class="flex items-center gap-3">${rackVisualHtml}<div id="qr-card-${cabinet.id}" class="qr-card-container"></div></div></div>
+                    <div class="space-y-4 mb-6"><div><div class="flex justify-between text-xs mb-1"><span class="text-gray-300">Ports Brassage</span><span class="neon-green">${totalPortsOccupied}/${maxPorts}</span></div><div class="progress-bar-container"><div class="progress-bar-fill bg-green-500" style="width:${Math.min(100, portPerc)}%"></div></div></div><div><div class="flex justify-between text-xs mb-1"><span class="text-gray-300">Espace Physique</span><span class="neon-cyan">${totalUOccupied}/${maxU}U</span></div><div class="progress-bar-container"><div class="progress-bar-fill bg-cyan-500" style="width:${Math.min(100, uPerc)}%"></div></div></div></div>
+                    <div class="flex gap-2 mb-4"><button onclick="editCabinet('${cabinet.id}')" class="btn-yellow text-xs px-3">Editer</button><button onclick="openAssetModal('${cabinet.id}')" class="btn-green text-xs px-3">Ajouter</button><button onclick="removeCabinet('${cabinet.id}')" class="btn-red text-xs px-3"><i class="fas fa-trash"></i></button></div>
+                    <div class="space-y-2 max-h-60 overflow-y-auto pr-2">${filteredAssetIds.map(id => { const a = inventory.assets[id]; return `<div class="p-2 bg-[#0d1117] rounded border border-gray-800 text-xs"><div class="flex justify-between font-bold"><span>${highlightSearchTerms(a.name, searchTerms)}</span><span class="text-gray-500">${a.type} ${a.uStart ? `(U${a.uStart})` : ''}</span></div><div class="flex gap-2 mt-1 opacity-70"><button onclick="editAsset('${a.id}')" class="text-yellow-500">Modifier</button><button onclick="removeAsset('${a.id}')" class="text-red-500">Supprimer</button></div></div>`; }).join('')}</div>`;
+                view.appendChild(card);
+                new QRCode(document.getElementById(`qr-card-${cabinet.id}`), { text: window.location.href.split('?')[0] + "?search=" + encodeURIComponent(cabinet.name), width: 50, height: 50 });
+            });
         }
-        if(btn) btn.innerHTML = "<i class='fas fa-cloud-upload-alt mr-2'></i>Sauvegarder (Cloud)";
-    }
-
-    // Chargement depuis GitHub
-    async function loadInventoryFromGitHub() {
-        try {
-            const result = await repo.contents(FILE_PATH).fetch();
-            githubSha = result.sha; // On garde le SHA pour la mise à jour
-            const decoded = decodeURIComponent(escape(atob(result.content)));
-            inventory = JSON.parse(decoded);
-            renderAll();
-            showToast('Données chargées depuis le Cloud', 'info');
-        } catch (err) {
-            // Si le fichier n'existe pas (première fois), on crée un inventaire vide
-            if (err.status === 404) {
-                console.log("Pas de données trouvées, création d'un nouveau fichier.");
-                inventory = { cabinets: {}, assets: {} };
-                renderAll();
-                // On crée le fichier initial
-                await saveInventoryToGitHub();
-            } else {
-                console.error(err);
-                showToast('Erreur de chargement', 'error');
-            }
-        }
-    }
-
-    // --- LOGIQUE MÉTIER (Identique à avant, mais appelle saveInventoryToGitHub) ---
-
-    function removeCabinet(id) {
-        if (confirm('Supprimer cette armoire et tout son contenu ?')) {
-            const assetIds = inventory.cabinets[id].assetIds;
-            assetIds.forEach(assetId => { delete inventory.assets[assetId]; });
-            delete inventory.cabinets[id];
-            saveInventoryToGitHub(); // ICI
-            renderAll();
-        }
-    }
-
-    function openCabinetModal(cabinetId = null) {
-        currentEditingCabinetId = cabinetId;
-        document.getElementById('cabinet-modal').classList.remove('hidden');
-        document.getElementById('cabinet-modal-title').textContent = cabinetId ? 'Modifier Armoire' : 'Ajouter Armoire';
-        const c = cabinetId ? inventory.cabinets[cabinetId] : null;
-        document.getElementById('cabinet-name').value = c?.name || '';
-        document.getElementById('cabinet-location').value = c?.location || '';
-        document.getElementById('cabinet-max-u').value = c?.maxU || 42;
-        document.getElementById('cabinet-max-ports').value = c?.maxPorts || 700;
-    }
-
-    function saveCabinet(e) {
-        e.preventDefault();
-        const id = currentEditingCabinetId || generateId();
-        inventory.cabinets[id] = { 
-            id, 
-            name: document.getElementById('cabinet-name').value, 
-            location: document.getElementById('cabinet-location').value, 
-            maxU: parseInt(document.getElementById('cabinet-max-u').value) || 42,
-            maxPorts: parseInt(document.getElementById('cabinet-max-ports').value) || 700,
-            assetIds: inventory.cabinets[id]?.assetIds || [] 
-        };
-        saveInventoryToGitHub(); renderAll(); closeModal(null, 'cabinet-modal');
-        showToast('Armoire sauvegardée', 'success');
-    }
-
-    function openAssetModal(cabinetId = null) {
-        currentEditingAssetId = null;
-        document.getElementById('asset-modal').classList.remove('hidden');
-        document.getElementById('asset-form').reset();
-        if (cabinetId) document.getElementById('asset-cabinet-id').value = cabinetId;
-        updateAssetFormFields('');
-    }
-
-    function updateAssetFormFields(type) {
-        document.getElementById('fields-subscriber').classList.toggle('hidden', type !== 'Abonné');
-        document.getElementById('fields-standard').classList.toggle('hidden', type === 'Abonné' || type === '');
-    }
-
-    function saveAsset(e) {
-        e.preventDefault();
-        const id = currentEditingAssetId || generateId();
-        const cabId = document.getElementById('asset-cabinet-id').value;
-        const type = document.getElementById('asset-type').value;
-        const asset = {
-            id, type, cabinetId: cabId,
-            name: document.getElementById('asset-name').value,
-            description: document.getElementById('asset-description').value,
-            phoneNumber: document.getElementById('asset-phone-number').value,
-            subscriberName: document.getElementById('asset-subscriber-name').value,
-            systemPort: document.getElementById('asset-system-port').value,
-            destinationPort: document.getElementById('asset-destination-port').value,
-            uStart: document.getElementById('asset-u-start').value,
-            uSize: document.getElementById('asset-u-size').value,
-            vlan: document.getElementById('asset-vlan').value,
-            port: document.getElementById('asset-port').value
-        };
-        inventory.assets[id] = asset;
-        if(!inventory.cabinets[cabId].assetIds.includes(id)) inventory.cabinets[cabId].assetIds.push(id);
-        saveInventoryToGitHub(); renderAll(); closeModal(null, 'asset-modal');
-    }
-
-    function editAsset(id) {
-        currentEditingAssetId = id;
-        const a = inventory.assets[id];
-        document.getElementById('asset-modal').classList.remove('hidden');
-        document.getElementById('asset-name').value = a.name;
-        document.getElementById('asset-type').value = a.type;
-        document.getElementById('asset-cabinet-id').value = a.cabinetId;
-        updateAssetFormFields(a.type);
-        document.getElementById('asset-phone-number').value = a.phoneNumber || '';
-        document.getElementById('asset-subscriber-name').value = a.subscriberName || '';
-        document.getElementById('asset-u-start').value = a.uStart || '';
-        document.getElementById('asset-u-size').value = a.uSize || '';
-    }
-
-    function removeAsset(id) {
-        if(!confirm('Supprimer cet équipement ?')) return;
-        const a = inventory.assets[id];
-        inventory.cabinets[a.cabinetId].assetIds = inventory.cabinets[a.cabinetId].assetIds.filter(aid => aid !== id);
-        delete inventory.assets[id];
-        saveInventoryToGitHub(); renderAll();
-    }
-
-    // --- RENDU VISUEL (Identique) ---
-    function renderInventory() {
-        const view = document.getElementById('inventory-view');
-        const filterCabinetId = document.getElementById('cabinet-filter').value;
-        const filterType = document.getElementById('type-filter').value;
-        const searchTerm = document.getElementById('search-input').value.toLowerCase().trim();
-        const searchTerms = searchTerm.split(/\s+/).filter(t => t.length > 0);
+        function updateAssetDropdown() { const filter = document.getElementById('cabinet-filter'); const form = document.getElementById('asset-cabinet-id'); const ids = Object.keys(inventory.cabinets); let options = '<option value="">Toutes les armoires</option>'; let formOptions = ''; ids.forEach(id => { const c = inventory.cabinets[id]; options += `<option value="${id}">${c.name}</option>`; formOptions += `<option value="${id}">${c.name} (${c.maxU}U)</option>`; }); filter.innerHTML = options; form.innerHTML = formOptions; }
+        function filterInventory() { renderInventory(); }
+        function renderStats() { const container = document.getElementById('stats-container'); const cabs = Object.keys(inventory.cabinets).length; const assets = Object.keys(inventory.assets).length; const subs = Object.values(inventory.assets).filter(a => a.type === 'Abonné').length; container.innerHTML = `<div class="bg-dark-gray p-4 rounded-lg text-center border border-gray-700"><div class="text-2xl font-bold neon-cyan">${cabs}</div><p class="text-xs text-gray-400">Armoires</p></div><div class="bg-dark-gray p-4 rounded-lg text-center border border-gray-700"><div class="text-2xl font-bold neon-green">${assets}</div><p class="text-xs text-gray-400">Équipements</p></div><div class="bg-dark-gray p-4 rounded-lg text-center border border-gray-700"><div class="text-2xl font-bold neon-yellow">${subs}</div><p class="text-xs text-gray-400">Abonnés</p></div><div class="bg-dark-gray p-4 rounded-lg text-center border border-gray-700"><div class="text-2xl font-bold neon-red">${Math.round((subs / 700) * 100)}%</div><p class="text-xs text-gray-400">Occup. Moyenne</p></div>`; }
+        function renderAll() { updateAssetDropdown(); renderStats(); renderInventory(); }
+        function closeModal(event, id) { if (!event || event.target.id === id) document.getElementById(id).classList.add('hidden'); }
+        function clearAllData() { if (confirm('Vider tout ?')) { inventory = { cabinets: {}, assets: {} }; saveInventoryToLocalStorage(); renderAll(); } }
+        function exportInventory() { const blob = new Blob([JSON.stringify(inventory, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'inventaire_data.json'; a.click(); }
+        function importInventory(e) { const reader = new FileReader(); reader.onload = (event) => { try { inventory = JSON.parse(event.target.result); saveInventoryToLocalStorage(); renderAll(); showToast('Import réussi', 'success'); } catch (err) { showToast('Erreur de fichier JSON', 'error'); } }; reader.readAsText(e.target.files[0]); }
+        function exportToPdf() { const { jsPDF } = window.jspdf; const doc = new jsPDF(); doc.setFontSize(18); doc.setTextColor(0, 255, 255); doc.text("Inventaire Technique Complet", 14, 15); let y = 25; Object.values(inventory.cabinets).forEach(cabinet => { if (y > 240) { doc.addPage(); y = 20; } doc.setFontSize(14); doc.setTextColor(0, 255, 136); doc.text(`Armoire : ${cabinet.name}`, 14, y); doc.setFontSize(10); doc.setTextColor(150); doc.text(`Localisation: ${cabinet.location} | Capacité: ${cabinet.maxU}U / ${cabinet.maxPorts}P`, 14, y + 5); y += 10; const rows = cabinet.assetIds.map(id => { const a = inventory.assets[id]; return [a.name, a.type, (a.type === 'Abonné') ? (a.subscriberName || '-') : (`U${a.uStart || '-'}`), (a.type === 'Abonné') ? (a.systemPort || '-') : (a.vlan || '-'), a.description || '-']; }); if (rows.length > 0) { doc.autoTable({ startY: y, head: [['Nom', 'Type', 'Détails', 'Port/VLAN', 'Notes']], body: rows, theme: 'grid', headStyles: { fillColor: [22, 27, 34], textColor: [0, 255, 136] }, styles: { fontSize: 8 }, margin: { left: 14, right: 14 } }); y = doc.lastAutoTable.finalY + 15; } }); doc.save('inventaire_complet.pdf'); }
+        function exportSubscribersToPdf() { const { jsPDF } = window.jspdf; const doc = new jsPDF(); doc.setFontSize(18); doc.setTextColor(255, 204, 0); doc.text("Liste des Abonnés", 14, 15); const rows = []; Object.values(inventory.cabinets).forEach(c => { c.assetIds.forEach(id => { const a = inventory.assets[id]; if (a.type === 'Abonné') rows.push([c.name, a.name, a.subscriberName || '-', a.phoneNumber || '-', a.systemPort || '-', a.destinationPort || '-']); }); }); doc.autoTable({ startY: 25, head: [['Armoire', 'Nom', 'Client', 'Tel', 'Port Sys', 'Port Dest']], body: rows, headStyles: { fillColor: [255, 204, 0], textColor: [0, 0, 0] } }); doc.save('liste_abonnes.pdf'); }
+        function imprimerPlancheQR() { const win = window.open('', '_blank'); win.document.write(`<html><head><title>Planche QR</title><script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script><style>body{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;padding:20px;}.label{border:1px dashed #ccc;padding:10px;text-align:center;}</style></head><body><script>const cabs=${JSON.stringify(Object.values(inventory.cabinets))};cabs.forEach((c,i)=>{const d=document.createElement('div');d.className='label';d.innerHTML='<b>'+c.name+'</b><div id="qri-'+i+'"></div>';document.body.appendChild(d);new QRCode(document.getElementById('qri-'+i),{text:window.location.href.split('?')[0]+"?search="+encodeURIComponent(c.name),width:100,height:100});});setTimeout(()=>{window.print();window.close();},1000);<\/script></body></html>`); win.document.close(); }
         
-        view.innerHTML = '';
-        let filteredCabinets = Object.values(inventory.cabinets).sort((a,b) => a.name.localeCompare(b.name));
+        window.onload = function () {
+            // Tentative de chargement auto si le fichier data.json existe à côté
+            fetch('./inventaire_data.json')
+                .then(response => {
+                    if (!response.ok) throw new Error('Pas de fichier data.json distant');
+                    return response.json();
+                })
+                .then(data => {
+                    inventory = data;
+                    saveInventoryToLocalStorage(); // Sauvegarde locale pour rapidité
+                    renderAll();
+                    showToast('Données synchronisées', 'info');
+                })
+                .catch(() => {
+                    // Sinon on charge le localStorage
+                    loadInventoryFromLocalStorage();
+                });
 
-        if (filterCabinetId) filteredCabinets = filteredCabinets.filter(c => c.id === filterCabinetId);
-
-        filteredCabinets.forEach(cabinet => {
-            const maxU = cabinet.maxU || 42;
-            const maxPorts = cabinet.maxPorts || 700;
-
-            let totalUOccupied = 0;
-            let totalPortsOccupied = 0;
-            
-            let rackVisualHtml = `<div class="rack-visual" title="Visualisation U (Taille: ${maxU}U)">`;
-            let uMap = new Array(maxU).fill('empty');
-
-            cabinet.assetIds.forEach(id => {
-                const a = inventory.assets[id];
-                if (!a) return;
-
-                if (a.type === 'Abonné') {
-                    totalPortsOccupied += 1;
-                } else {
-                    const size = parseInt(a.uSize) || 0;
-                    const start = parseInt(a.uStart) || 0;
-                    totalUOccupied += size;
-                    
-                    if (start > 0 && start <= maxU) {
-                        for(let i = 0; i < size; i++) {
-                            let uIndex = start + i - 1; 
-                            if (uIndex < maxU) {
-                                if (a.type === 'Serveur') uMap[uIndex] = 'server';
-                                else if (a.type === 'Switch') uMap[uIndex] = 'switch';
-                                else uMap[uIndex] = 'other';
-                            }
-                        }
-                    }
-                }
-            });
-
-            uMap.forEach(state => { rackVisualHtml += `<div class="rack-unit ${state}"></div>`; });
-            rackVisualHtml += '</div>';
-
-            const filteredAssetIds = cabinet.assetIds.filter(id => {
-                const a = inventory.assets[id];
-                if (!a) return false;
-                if (filterType && a.type !== filterType) return false;
-                if (searchTerms.length > 0) {
-                    const fields = [a.name, a.subscriberName, a.phoneNumber, a.systemPort, a.destinationPort, cabinet.name].join(' ').toLowerCase();
-                    return searchTerms.every(t => fields.includes(t));
-                }
-                return true;
-            });
-
-            if (filteredAssetIds.length === 0 && (searchTerm || filterType)) return;
-
-            const portPerc = (totalPortsOccupied / maxPorts) * 100;
-            const uPerc = (totalUOccupied / maxU) * 100;
-
-            const card = document.createElement('div');
-            card.className = `bg-dark-gray p-6 rounded-xl border border-gray-700 shadow-2xl transition-all ${cabinet.name.toLowerCase() === searchTerm ? 'highlight-scan' : ''}`;
-            
-            // URL absolue pour le QR Code (votre page GitHub)
-            const pageUrl = `https://votre-username.github.io/inventaire-tech/?search=${encodeURIComponent(cabinet.name)}`;
-
-            card.innerHTML = `
-                <div class="flex justify-between items-start mb-4 border-b border-gray-700 pb-2">
-                    <div>
-                        <h3 class="text-2xl font-bold neon-cyan">${highlightSearchTerms(cabinet.name, searchTerms)}</h3>
-                        <p class="text-xs text-gray-400">${highlightSearchTerms(cabinet.location, searchTerms)} | ${maxU}U - ${maxPorts} Ports</p>
-                    </div>
-                    <div class="flex items-center gap-3">
-                        ${rackVisualHtml}
-                        <div id="qr-card-${cabinet.id}" class="qr-card-container"></div>
-                    </div>
-                </div>
-                <div class="space-y-4 mb-6">
-                    <div>
-                        <div class="flex justify-between text-xs mb-1">
-                            <span class="text-gray-300">Ports Brassage</span>
-                            <span class="neon-green">${totalPortsOccupied}/${maxPorts}</span>
-                        </div>
-                        <div class="progress-bar-container"><div class="progress-bar-fill bg-green-500" style="width:${Math.min(100, portPerc)}%"></div></div>
-                    </div>
-                    <div>
-                        <div class="flex justify-between text-xs mb-1">
-                            <span class="text-gray-300">Espace Physique</span>
-                            <span class="neon-cyan">${totalUOccupied}/${maxU}U</span>
-                        </div>
-                        <div class="progress-bar-container"><div class="progress-bar-fill bg-cyan-500" style="width:${Math.min(100, uPerc)}%"></div></div>
-                    </div>
-                </div>
-                <div class="flex gap-2 mb-4">
-                    <button onclick="editCabinet('${cabinet.id}')" class="btn-yellow text-xs px-3">Editer</button>
-                    <button onclick="openAssetModal('${cabinet.id}')" class="btn-green text-xs px-3">Ajouter</button>
-                    <button onclick="removeCabinet('${cabinet.id}')" class="btn-red text-xs px-3"><i class="fas fa-trash"></i></button>
-                </div>
-                <div class="space-y-2 max-h-60 overflow-y-auto pr-2">
-                    ${filteredAssetIds.map(id => {
-                        const a = inventory.assets[id];
-                        return `<div class="p-2 bg-[#0d1117] rounded border border-gray-800 text-xs">
-                            <div class="flex justify-between font-bold">
-                                <span>${highlightSearchTerms(a.name, searchTerms)}</span>
-                                <span class="text-gray-500">${a.type} ${a.uStart ? `(U${a.uStart})` : ''}</span>
-                            </div>
-                            <div class="flex gap-2 mt-1 opacity-70">
-                                <button onclick="editAsset('${a.id}')" class="text-yellow-500">Modifier</button>
-                                <button onclick="removeAsset('${a.id}')" class="text-red-500">Supprimer</button>
-                            </div>
-                        </div>`;
-                    }).join('')}
-                </div>
-            `;
-            view.appendChild(card);
-
-            new QRCode(document.getElementById(`qr-card-${cabinet.id}`), {
-                text: pageUrl, // Utilise l'URL GitHub
-                width: 50, height: 50
-            });
-        });
-    }
-
-    function updateAssetDropdown() {
-        const filter = document.getElementById('cabinet-filter');
-        const form = document.getElementById('asset-cabinet-id');
-        const ids = Object.keys(inventory.cabinets);
-        let options = '<option value="">Toutes les armoires</option>';
-        let formOptions = '';
-        ids.forEach(id => {
-            const c = inventory.cabinets[id];
-            options += `<option value="${id}">${c.name}</option>`;
-            formOptions += `<option value="${id}">${c.name} (${c.maxU}U)</option>`;
-        });
-        filter.innerHTML = options;
-        form.innerHTML = formOptions;
-    }
-
-    function filterInventory() { renderInventory(); }
-
-    function renderStats() {
-        const container = document.getElementById('stats-container');
-        const cabs = Object.keys(inventory.cabinets).length;
-        const assets = Object.keys(inventory.assets).length;
-        const subs = Object.values(inventory.assets).filter(a => a.type === 'Abonné').length;
-        container.innerHTML = `
-            <div class="bg-dark-gray p-4 rounded-lg text-center border border-gray-700"><div class="text-2xl font-bold neon-cyan">${cabs}</div><p class="text-xs text-gray-400">Armoires</p></div>
-            <div class="bg-dark-gray p-4 rounded-lg text-center border border-gray-700"><div class="text-2xl font-bold neon-green">${assets}</div><p class="text-xs text-gray-400">Équipements</p></div>
-            <div class="bg-dark-gray p-4 rounded-lg text-center border border-gray-700"><div class="text-2xl font-bold neon-yellow">${subs}</div><p class="text-xs text-gray-400">Abonnés</p></div>
-            <div class="bg-dark-gray p-4 rounded-lg text-center border border-gray-700"><div class="text-2xl font-bold neon-red">${Math.round((subs/700)*100)}%</div><p class="text-xs text-gray-400">Occup. Moyenne</p></div>
-        `;
-    }
-
-    function renderAll() { updateAssetDropdown(); renderStats(); renderInventory(); }
-
-    function closeModal(event, id) { if (!event || event.target.id === id) document.getElementById(id).classList.add('hidden'); }
-
-    function clearAllData() { if(confirm('Vider tout ?')) { inventory = {cabinets:{}, assets:{}}; saveInventoryToGitHub(); renderAll(); } }
-    
-    // Les imports manuels sont moins utiles maintenant, mais on peut garder
-    function exportInventory() { 
-        const blob = new Blob([JSON.stringify(inventory, null, 2)], {type:'application/json'});
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'export_inventaire.json'; a.click();
-    }
-    
-    function importInventory(e) {
-        const reader = new FileReader();
-        reader.onload = (event) => { 
-            try {
-                inventory = JSON.parse(event.target.result); 
-                saveInventoryToGitHub(); // Sauvegarde sur GitHub immédiatement
-                renderAll();
-                showToast('Importé et sauvegardé', 'success');
-            } catch(err) {
-                showToast('Erreur de fichier JSON', 'error');
-            }
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('search')) { document.getElementById('search-input').value = params.get('search'); filterInventory(); }
         };
-        reader.readAsText(e.target.files[0]);
-    }
-
-    // --- EXPORTS PDF (Inchangés) ---
-    function exportToPdf() {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF();
-        doc.setFontSize(18);
-        doc.setTextColor(0, 255, 255);
-        doc.text("Inventaire Technique Complet", 14, 15);
-        let y = 25;
-        Object.values(inventory.cabinets).forEach(cabinet => {
-            if (y > 240) { doc.addPage(); y = 20; }
-            doc.setFontSize(14);
-            doc.setTextColor(0, 255, 136);
-            doc.text(`Armoire : ${cabinet.name}`, 14, y);
-            doc.setFontSize(10);
-            doc.setTextColor(150);
-            doc.text(`Localisation: ${cabinet.location} | Capacité: ${cabinet.maxU}U / ${cabinet.maxPorts}P`, 14, y + 5);
-            y += 10;
-            const rows = cabinet.assetIds.map(id => {
-                const a = inventory.assets[id];
-                return [a.name, a.type, (a.type === 'Abonné') ? (a.subscriberName || '-') : (`U${a.uStart || '-'}`), (a.type === 'Abonné') ? (a.systemPort || '-') : (a.vlan || '-'), a.description || '-'];
-            });
-            if (rows.length > 0) {
-                doc.autoTable({ startY: y, head: [['Nom', 'Type', 'Détails', 'Port/VLAN', 'Notes']], body: rows, theme: 'grid', headStyles: { fillColor: [22, 27, 34], textColor: [0, 255, 136] }, styles: { fontSize: 8 }, margin: { left: 14, right: 14 } });
-                y = doc.lastAutoTable.finalY + 15;
-            }
-        });
-        doc.save('inventaire_complet.pdf');
-    }
-
-    function exportSubscribersToPdf() {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF();
-        doc.setFontSize(18);
-        doc.setTextColor(255, 204, 0);
-        doc.text("Liste des Abonnés", 14, 15);
-        const rows = [];
-        Object.values(inventory.cabinets).forEach(c => {
-            c.assetIds.forEach(id => {
-                const a = inventory.assets[id];
-                if (a.type === 'Abonné') rows.push([c.name, a.name, a.subscriberName || '-', a.phoneNumber || '-', a.systemPort || '-', a.destinationPort || '-']);
-            });
-        });
-        doc.autoTable({ startY: 25, head: [['Armoire', 'Nom', 'Client', 'Tel', 'Port Sys', 'Port Dest']], body: rows, headStyles: { fillColor: [255, 204, 0], textColor: [0, 0, 0] } });
-        doc.save('liste_abonnes.pdf');
-    }
-
-    function imprimerPlancheQR() {
-        const win = window.open('', '_blank');
-        const baseUrl = "https://votre-username.github.io/inventaire-tech/"; // Changez ceci
-        win.document.write(`<html><head><title>Planche QR</title><script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script><style>body{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;padding:20px;}.label{border:1px dashed #ccc;padding:10px;text-align:center;}</style></head><body><script>const cabs=${JSON.stringify(Object.values(inventory.cabinets))};cabs.forEach((c,i)=>{const d=document.createElement('div');d.className='label';d.innerHTML='<b>'+c.name+'</b><div id="qri-'+i+'"></div>';document.body.appendChild(d);new QRCode(document.getElementById('qri-'+i),{text:baseUrl+"?search="+encodeURIComponent(c.name),width:100,height:100});});setTimeout(()=>{window.print();window.close();},1000);<\/script></body></html>`);
-        win.document.close();
-    }
-
-    // --- INITIALISATION ---
-    window.onload = function() {
-        loadInventoryFromGitHub(); // Charge depuis GitHub au démarrage
-        const params = new URLSearchParams(window.location.search);
-        if(params.get('search')) {
-            document.getElementById('search-input').value = params.get('search');
-            filterInventory();
-        }
-    };
-</script>
+    </script>
+</body>
+</html>
